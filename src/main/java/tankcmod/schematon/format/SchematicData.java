@@ -16,6 +16,8 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
+import net.minecraft.world.level.BlockAndTintGetter;
+import tankcmod.schematon.compat.CompatManager;
 
 import java.io.File;
 import java.io.IOException;
@@ -124,7 +126,7 @@ public class SchematicData {
     }
 
     @Nullable
-    public BlockEntity getOrCreateBlockEntity(BlockPos pos, Level clientLevel) {
+    public BlockEntity getOrCreateBlockEntity(BlockPos pos, Level clientLevel, BlockAndTintGetter schematicLevel) {
         if (cachedBlockEntities.containsKey(pos)) {
             return cachedBlockEntities.get(pos);
         }
@@ -137,12 +139,25 @@ public class SchematicData {
 
         BlockEntity be = entityBlock.newBlockEntity(pos, state);
         if (be != null) {
-            be.setLevel(clientLevel);
             CompoundTag tag = blockEntityTags.get(pos);
             if (tag != null) {
+                // 1. Let handlers fix up missing NBT (like AE2 missing connections)
+                tag = CompatManager.prepareTag(be, tag, pos, schematicLevel);
+
+                // 2. LOAD NBT BEFORE ATTACHING CLIENT LEVEL!
+                // This bypasses isClientSide() guards in mods so they actually initialize their parts.
                 be.load(tag);
             }
+
+            // 3. Attach the client level now that the raw data is safely inside
+            be.setLevel(clientLevel);
+
+            // 4. Trigger post-load client visual updates
+            if (tag != null) {
+                CompatManager.onBlockEntityLoad(be, tag, pos, schematicLevel);
+            }
         }
+
         cachedBlockEntities.put(pos, be);
         return be;
     }

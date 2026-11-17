@@ -47,7 +47,7 @@ public class VirtualSchematicLevel implements BlockAndTintGetter {
         if (!schematic.isInside(pos.getX(), pos.getY(), pos.getZ())) {
             return null;
         }
-        return schematic.getOrCreateBlockEntity(pos, realClientLevel);
+        return schematic.getOrCreateBlockEntity(pos, realClientLevel, this);
     }
 
     @Override

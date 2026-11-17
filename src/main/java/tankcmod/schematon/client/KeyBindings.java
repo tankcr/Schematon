@@ -17,12 +17,12 @@ public class KeyBindings {
             CATEGORY
     );
 
-    // Defaults to '/'
+    // Defaults to numpad '/'
     public static final KeyMapping KEY_CONTROL_GUI = new KeyMapping(
             "key.schematon.control",
             KeyConflictContext.IN_GAME,
             InputConstants.Type.KEYSYM,
-            GLFW.GLFW_KEY_SLASH,
+            GLFW.GLFW_KEY_KP_DIVIDE,
             CATEGORY
     );
 }

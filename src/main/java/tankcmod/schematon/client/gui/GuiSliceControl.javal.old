@@ -1,0 +1,71 @@
+package tankcmod.schematon.client.gui;
+
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import tankcmod.schematon.world.SchematicPlacement;
+import tankcmod.schematon.world.VirtualSchematicLevel;
+
+public class GuiSliceControl extends Screen {
+    private final Screen parent;
+    private int maxHeight = 255;
+
+    public GuiSliceControl(Screen parent) {
+        super(Component.literal("Slice Control"));
+        this.parent = parent;
+
+        VirtualSchematicLevel active = SchematicPlacement.getActiveSchematic();
+        if (active != null) {
+            this.maxHeight = active.getSchematic().getSize().getY() - 1;
+        }
+    }
+
+    @Override
+    protected void init() {
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+
+        this.addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustLayer(-1))
+                .bounds(centerX - 40, centerY - 10, 20, 20).build());
+
+        this.addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustLayer(1))
+                .bounds(centerX + 20, centerY - 10, 20, 20).build());
+
+        this.addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.minecraft.setScreen(this.parent))
+                .bounds(centerX - 50, this.height - 30, 100, 20).build());
+    }
+
+    private void adjustLayer(int delta) {
+        int current = SchematicPlacement.getLayerY();
+        int step = hasShiftDown() ? 5 : 1;
+
+        int newY = current + (delta * step);
+        // Clamp to schematic bounds
+        newY = Math.max(0, Math.min(newY, maxHeight));
+
+        SchematicPlacement.setLayerY(newY);
+    }
+
+    @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(graphics);
+
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+
+        graphics.drawCenteredString(this.font, this.title, centerX, 12, 0xFFFFFF);
+
+        String modeText = SchematicPlacement.getLayerMode().name().replace("_", " ");
+        graphics.drawCenteredString(this.font, "Mode: " + modeText, centerX, centerY - 30, 0xAAAAAA);
+
+        graphics.drawCenteredString(this.font, String.valueOf(SchematicPlacement.getLayerY()), centerX, centerY - 4, 0xFFFFFF);
+
+        super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+}
