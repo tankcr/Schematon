@@ -11,3 +11,7 @@ crash-reports/
 .idea/
 .DS_Store
 src/generated/
+
+build/
+.gradle/
+run/
