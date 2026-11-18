@@ -204,9 +204,6 @@ public class SchematicRenderer {
         }
     }
 
-    // TODO: Link this to a toggle button in GuiSchematicControl later
-    public static boolean renderExcavations = true;
-
     private static void renderValidationOverlays(PoseStack poseStack, VirtualSchematicLevel virtualLevel, BlockPos origin) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return;
@@ -251,7 +248,7 @@ public class SchematicRenderer {
 
                     // 3. Air (Schem) + Block/Fluid (World) -> Needs excavation/clearing.
                     if (schState.isAir() && !worldState.isAir()) {
-                        if (renderExcavations) {
+                        if (SchematicPlacement.isExcavateAir()) {
                             // Magenta for excavation: R=1.0, G=0.0, B=1.0
                             drawMinimalHighlightBox(builder, matrix, x, y, z, 1.0f, 0.0f, 1.0f, 0.6f);
                         }
@@ -274,6 +271,7 @@ public class SchematicRenderer {
 
         tesselator.end();
     }
+
     private static void drawMinimalHighlightBox(BufferBuilder builder, Matrix4f matrix, int x, int y, int z, float r, float g, float b, float a) {
         // Inflate slightly (0.005) to prevent Z-fighting/flickering against solid block textures
         float min = -0.005f;

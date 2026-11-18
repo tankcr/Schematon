@@ -1,12 +1,16 @@
 package tankcmod.schematon.client.gui;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import tankcmod.schematon.world.SchematicPlacement;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class GuiSchematicControl extends Screen {
     private EditBox xBox;
@@ -19,6 +23,19 @@ public class GuiSchematicControl extends Screen {
     private Button layerPlusBtn;
     private EditBox layerBox;
 
+    // Compact / Auto-collapse state
+    private boolean compactMoveMode = false;
+    private Button expandBtn;
+    private final List<AbstractWidget> fullModeWidgets = new ArrayList<>();
+
+    // Cached layout coordinates for the bottom-left Move Panel
+    private int movePanelX;
+    private int movePanelY;
+    private int movePanelW;
+    private int movePanelH;
+    private int moveRowX;
+    private int moveStartY;
+
     // Guard flag prevents EditBox responders from re-triggering during programmatic sync
     private boolean updatingBoxes = false;
 
@@ -28,51 +45,67 @@ public class GuiSchematicControl extends Screen {
 
     @Override
     protected void init() {
+        this.fullModeWidgets.clear();
+
         int centerX = this.width / 2;
-        int centerY = this.height / 2;
-
-        int rowX = centerX - 135;
-        int startY = centerY - 55;
         int rowSpacing = 24;
+        int margin = 12;
 
-        // --- LEFT COLUMN: Coordinates ---
-        this.xBox = createAxisRow("X:", rowX, startY, 0);
-        this.yBox = createAxisRow("Y:", rowX, startY + rowSpacing, 1);
-        this.zBox = createAxisRow("Z:", rowX, startY + (rowSpacing * 2), 2);
+        // --- BOTTOM-LEFT PANEL: Coordinates (Permanent Anchor, Zero Cursor-Chase) ---
+        this.movePanelW = 148;
+        this.movePanelH = (rowSpacing * 4) + 12; // 3 axis rows + Move Here + padding
+        this.movePanelX = margin;
+        this.movePanelY = this.height - this.movePanelH - margin;
+        this.moveRowX = this.movePanelX + 8;
+        this.moveStartY = this.movePanelY + 8;
+
+        this.xBox = createAxisRow("X:", this.moveRowX, this.moveStartY, 0);
+        this.yBox = createAxisRow("Y:", this.moveRowX, this.moveStartY + rowSpacing, 1);
+        this.zBox = createAxisRow("Z:", this.moveRowX, this.moveStartY + (rowSpacing * 2), 2);
 
         this.addRenderableWidget(Button.builder(Component.literal("Move Here"), b -> {
             if (this.minecraft != null && this.minecraft.player != null) {
                 SchematicPlacement.setOrigin(this.minecraft.player.blockPosition());
                 syncBoxesFromPlacement();
+                setCompactMoveMode(true);
             }
-        }).bounds(rowX + 18, startY + (rowSpacing * 3), 114, 20).build());
+        }).bounds(this.moveRowX + 18, this.moveStartY + (rowSpacing * 3), 114, 20).build());
+
+        // Compact-only button to restore the full menu
+        this.expandBtn = this.addRenderableWidget(Button.builder(Component.literal("Expand Menu"), b -> {
+            setCompactMoveMode(false);
+        }).bounds(this.movePanelX, this.movePanelY - 24, this.movePanelW, 20).build());
 
 
-        // --- RIGHT COLUMN: Utilities & Slicing ---
-        int utilX = centerX + 35;
+        // --- RIGHT EDGE: Utilities & Slicing (Hidden in Compact Mode) ---
+        int utilW = 85;
+        int utilX = this.width - utilW - margin;
+        int utilStartY = (this.height - (rowSpacing * 6)) / 2;
 
         // Row 1: Unload (Half Width) & Hide/Show (Half Width)
-        this.addRenderableWidget(Button.builder(Component.literal("Unload"), b -> {
+        addFullModeWidget(Button.builder(Component.literal("Unload"), b -> {
             SchematicPlacement.setActiveSchematic(null);
-            this.minecraft.setScreen(null);
-        }).bounds(utilX, startY, 40, 20).build());
+            if (this.minecraft != null) {
+                this.minecraft.setScreen(null);
+            }
+        }).bounds(utilX, utilStartY, 40, 20).build());
 
-        this.addRenderableWidget(Button.builder(Component.literal(SchematicPlacement.isHidden() ? "Show" : "Hide"), b -> {
+        addFullModeWidget(Button.builder(Component.literal(SchematicPlacement.isHidden() ? "Show" : "Hide"), b -> {
             SchematicPlacement.setHidden(!SchematicPlacement.isHidden());
             b.setMessage(Component.literal(SchematicPlacement.isHidden() ? "Show" : "Hide"));
-        }).bounds(utilX + 45, startY, 40, 20).build());
+        }).bounds(utilX + 45, utilStartY, 40, 20).build());
 
         // Row 2: Layer Mode Toggle
-        this.layerModeBtn = this.addRenderableWidget(Button.builder(Component.literal("Layers: ALL"), b -> {
+        this.layerModeBtn = addFullModeWidget(Button.builder(Component.literal("Layers: ALL"), b -> {
             cycleLayerMode();
-        }).bounds(utilX, startY + rowSpacing, 85, 20).build());
+        }).bounds(utilX, utilStartY + rowSpacing, utilW, 20).build());
 
-        // Row 3: Layer Selection (-, Box, +) - 85px total width
-        this.layerMinusBtn = this.addRenderableWidget(Button.builder(Component.literal("-"), b -> {
+        // Row 3: Layer Selection (-, Box, +)
+        this.layerMinusBtn = addFullModeWidget(Button.builder(Component.literal("-"), b -> {
             nudgeLayer(hasShiftDown() ? -5 : -1);
-        }).bounds(utilX, startY + (rowSpacing * 2), 20, 20).build());
+        }).bounds(utilX, utilStartY + (rowSpacing * 2), 20, 20).build());
 
-        this.layerBox = new EditBox(this.font, utilX + 22, startY + (rowSpacing * 2) + 1, 41, 18, Component.literal("Layer"));
+        this.layerBox = new EditBox(this.font, utilX + 22, utilStartY + (rowSpacing * 2) + 1, 41, 18, Component.literal("Layer"));
         this.layerBox.setMaxLength(4);
         this.layerBox.setFilter(text -> text.matches("-?\\d*"));
         this.layerBox.setResponder(text -> {
@@ -81,34 +114,64 @@ public class GuiSchematicControl extends Screen {
                 setLayerSafe(Integer.parseInt(text));
             } catch (NumberFormatException ignored) {}
         });
-        this.addRenderableWidget(this.layerBox);
+        addFullModeWidget(this.layerBox);
 
-        this.layerPlusBtn = this.addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+        this.layerPlusBtn = addFullModeWidget(Button.builder(Component.literal("+"), b -> {
             nudgeLayer(hasShiftDown() ? 5 : 1);
-        }).bounds(utilX + 65, startY + (rowSpacing * 2), 20, 20).build());
+        }).bounds(utilX + 65, utilStartY + (rowSpacing * 2), 20, 20).build());
 
         // Row 4: Materials
-        Button materialsBtn = Button.builder(Component.literal("Materials"), b -> {
-            if (SchematicPlacement.getActiveSchematic() != null) {
+        addFullModeWidget(Button.builder(Component.literal("Materials"), b -> {
+            if (SchematicPlacement.getActiveSchematic() != null && this.minecraft != null) {
                 this.minecraft.setScreen(new GuiSchematicMaterials(this));
             }
-        }).bounds(utilX, startY + (rowSpacing * 3), 85, 20).build();
-        // REMOVED: materialsBtn.active = false;
-        this.addRenderableWidget(materialsBtn);
+        }).bounds(utilX, utilStartY + (rowSpacing * 3), utilW, 20).build());
 
         // Row 5: Printer
         Button printerBtn = Button.builder(Component.literal("Printer: OFF"), b -> {})
-                .bounds(utilX, startY + (rowSpacing * 4), 85, 20).build();
+                .bounds(utilX, utilStartY + (rowSpacing * 4), utilW, 20).build();
         printerBtn.active = false;
-        this.addRenderableWidget(printerBtn);
+        addFullModeWidget(printerBtn);
+
+        // Row 6: Excavation Toggle
+        addFullModeWidget(Button.builder(
+                Component.literal(getExcavationButtonText()),
+                b -> {
+                    SchematicPlacement.setExcavateAir(!SchematicPlacement.isExcavateAir());
+                    b.setMessage(Component.literal(getExcavationButtonText()));
+                }
+        ).bounds(utilX, utilStartY + (rowSpacing * 5), utilW, 20).build());
 
 
-        // --- BOTTOM ---
-        this.addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.minecraft.setScreen(null))
-                .bounds(centerX - 50, this.height - 30, 100, 20).build());
+        // --- BOTTOM CENTER: Done (Hidden in Compact Mode; Esc still closes) ---
+        addFullModeWidget(Button.builder(Component.literal("Done"), b -> {
+            if (this.minecraft != null) {
+                this.minecraft.setScreen(null);
+            }
+        }).bounds(centerX - 50, this.height - 30, 100, 20).build());
 
         syncBoxesFromPlacement();
         updateLayerControls();
+        setCompactMoveMode(this.compactMoveMode);
+    }
+
+    private <T extends AbstractWidget> T addFullModeWidget(T widget) {
+        this.fullModeWidgets.add(widget);
+        return this.addRenderableWidget(widget);
+    }
+
+    private void setCompactMoveMode(boolean compact) {
+        this.compactMoveMode = compact;
+        for (AbstractWidget widget : this.fullModeWidgets) {
+            widget.visible = !compact;
+        }
+        if (this.expandBtn != null) {
+            this.expandBtn.visible = compact;
+        }
+    }
+
+    private String getExcavationButtonText() {
+        return SchematicPlacement.isExcavateAir() ? "Excavate: ON" : "Excavate: OFF";
     }
 
     private EditBox createAxisRow(String label, int x, int y, int axisIndex) {
@@ -117,6 +180,7 @@ public class GuiSchematicControl extends Screen {
         int controlStart = x + 18;
 
         this.addRenderableWidget(Button.builder(Component.literal("-"), b -> {
+            setCompactMoveMode(true);
             nudgeAxis(axisIndex, hasShiftDown() ? -10 : -1);
         }).bounds(controlStart, y, btnWidth, 20).build());
 
@@ -125,11 +189,13 @@ public class GuiSchematicControl extends Screen {
         box.setFilter(text -> text.matches("-?\\d*"));
         box.setResponder(text -> {
             if (this.updatingBoxes) return;
+            setCompactMoveMode(true);
             applyTypedCoordinate(axisIndex, text);
         });
         this.addRenderableWidget(box);
 
         this.addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+            setCompactMoveMode(true);
             nudgeAxis(axisIndex, hasShiftDown() ? 10 : 1);
         }).bounds(controlStart + btnWidth + boxWidth + 8, y, btnWidth, 20).build());
 
@@ -166,8 +232,8 @@ public class GuiSchematicControl extends Screen {
         SchematicPlacement.LayerMode current = SchematicPlacement.getLayerMode();
         SchematicPlacement.LayerMode next = switch (current) {
             case ALL -> SchematicPlacement.LayerMode.ALL_BELOW;
-            case ALL_BELOW -> SchematicPlacement.LayerMode.ALL_ABOVE; // ADDED: transition to ALL_ABOVE
-            case ALL_ABOVE -> SchematicPlacement.LayerMode.SINGLE_LAYER; // ADDED: transition to SINGLE_LAYER
+            case ALL_BELOW -> SchematicPlacement.LayerMode.ALL_ABOVE;
+            case ALL_ABOVE -> SchematicPlacement.LayerMode.SINGLE_LAYER;
             case SINGLE_LAYER -> SchematicPlacement.LayerMode.ALL;
         };
         SchematicPlacement.setLayerMode(next);
@@ -178,7 +244,6 @@ public class GuiSchematicControl extends Screen {
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
         boolean slicingActive = (mode != SchematicPlacement.LayerMode.ALL);
 
-        // Grey out / Disable layer Y selection if mode is ALL
         this.layerMinusBtn.active = slicingActive;
         this.layerPlusBtn.active = slicingActive;
         this.layerBox.setEditable(slicingActive);
@@ -186,7 +251,7 @@ public class GuiSchematicControl extends Screen {
         String modeLabel = switch (mode) {
             case ALL -> "Layers: ALL";
             case ALL_BELOW -> "Layers: BELOW";
-            case ALL_ABOVE -> "Layers: ABOVE"; // ADDED: Label for ALL_ABOVE
+            case ALL_ABOVE -> "Layers: ABOVE";
             case SINGLE_LAYER -> "Layers: SINGLE";
         };
         this.layerModeBtn.setMessage(Component.literal(modeLabel));
@@ -228,30 +293,37 @@ public class GuiSchematicControl extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(graphics);
-
         int centerX = this.width / 2;
-        int centerY = this.height / 2;
-        int rowX = centerX - 135;
-        int startY = centerY - 55;
         int rowSpacing = 24;
 
-        graphics.drawCenteredString(this.font, this.title, centerX, 12, 0xFFFFFF);
+        if (!this.compactMoveMode) {
+            // Full menu: subtle dark backdrop + header info
+            this.renderBackground(graphics);
 
-        var active = SchematicPlacement.getActiveSchematic();
-        if (active != null) {
-            String info = active.getSchematic().getName() + " (" + active.getSchematic().getSize().toShortString() + ")";
-            graphics.drawCenteredString(this.font, info, centerX, 25, 0x55FFFF);
+            graphics.drawCenteredString(this.font, this.title, centerX, 12, 0xFFFFFF);
+
+            var active = SchematicPlacement.getActiveSchematic();
+            if (active != null) {
+                String info = active.getSchematic().getName() + " (" + active.getSchematic().getSize().toShortString() + ")";
+                graphics.drawCenteredString(this.font, info, centerX, 25, 0x55FFFF);
+            } else {
+                graphics.drawCenteredString(this.font, "No schematic loaded", centerX, 25, 0xFF5555);
+            }
         } else {
-            graphics.drawCenteredString(this.font, "No schematic loaded", centerX, 25, 0xFF5555);
+            // Compact Move Mode: 70% transparent (30% alpha = 0x4D) backdrop strictly behind the X/Y/Z panel
+            graphics.fill(
+                    this.movePanelX - 2,
+                    this.movePanelY - 2,
+                    this.movePanelX + this.movePanelW + 2,
+                    this.movePanelY + this.movePanelH + 2,
+                    0x4D000000
+            );
         }
 
-        // Axis labels
-        graphics.drawString(this.font, "X:", rowX, startY + 6, 0xFF5555);
-        graphics.drawString(this.font, "Y:", rowX, startY + rowSpacing + 6, 0x55FF55);
-        graphics.drawString(this.font, "Z:", rowX, startY + (rowSpacing * 2) + 6, 0x5555FF);
-
-        graphics.drawCenteredString(this.font, "Tip: Hold Shift + click [-]/[+] to move by 10 (or 5) blocks", centerX, this.height - 44, 0xAAAAAA);
+        // Axis labels (always visible in the bottom-left Move Panel)
+        graphics.drawString(this.font, "X:", this.moveRowX, this.moveStartY + 6, 0xFF5555);
+        graphics.drawString(this.font, "Y:", this.moveRowX, this.moveStartY + rowSpacing + 6, 0x55FF55);
+        graphics.drawString(this.font, "Z:", this.moveRowX, this.moveStartY + (rowSpacing * 2) + 6, 0x5555FF);
 
         super.render(graphics, mouseX, mouseY, partialTick);
     }

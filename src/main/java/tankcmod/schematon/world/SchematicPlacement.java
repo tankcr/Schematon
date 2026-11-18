@@ -14,7 +14,7 @@ public class SchematicPlacement {
     private static LayerMode layerMode = LayerMode.ALL;
     private static int layerY = 0;
     private static boolean hidden = false; // ADDED: hidden state
-
+    private static boolean excavateAir = true;
     public static void setActiveSchematic(VirtualSchematicLevel level) {
         activeSchematic = level;
         SchematicRenderer.markDirty();
@@ -65,5 +65,12 @@ public class SchematicPlacement {
 
     public static void setHidden(boolean state) {
         hidden = state;
+    }
+    public static boolean isExcavateAir() {
+        return excavateAir;
+    }
+
+    public static void setExcavateAir(boolean excavate) {
+        excavateAir = excavate;
     }
 }
