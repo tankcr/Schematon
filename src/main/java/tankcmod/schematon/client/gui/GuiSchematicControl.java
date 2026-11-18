@@ -51,11 +51,16 @@ public class GuiSchematicControl extends Screen {
         // --- RIGHT COLUMN: Utilities & Slicing ---
         int utilX = centerX + 35;
 
-        // Row 1: Unload
+        // Row 1: Unload (Half Width) & Hide/Show (Half Width)
         this.addRenderableWidget(Button.builder(Component.literal("Unload"), b -> {
             SchematicPlacement.setActiveSchematic(null);
             this.minecraft.setScreen(null);
-        }).bounds(utilX, startY, 85, 20).build());
+        }).bounds(utilX, startY, 40, 20).build());
+
+        this.addRenderableWidget(Button.builder(Component.literal(SchematicPlacement.isHidden() ? "Show" : "Hide"), b -> {
+            SchematicPlacement.setHidden(!SchematicPlacement.isHidden());
+            b.setMessage(Component.literal(SchematicPlacement.isHidden() ? "Show" : "Hide"));
+        }).bounds(utilX + 45, startY, 40, 20).build());
 
         // Row 2: Layer Mode Toggle
         this.layerModeBtn = this.addRenderableWidget(Button.builder(Component.literal("Layers: ALL"), b -> {
@@ -83,9 +88,12 @@ public class GuiSchematicControl extends Screen {
         }).bounds(utilX + 65, startY + (rowSpacing * 2), 20, 20).build());
 
         // Row 4: Materials
-        Button materialsBtn = Button.builder(Component.literal("Materials"), b -> {})
-                .bounds(utilX, startY + (rowSpacing * 3), 85, 20).build();
-        materialsBtn.active = false;
+        Button materialsBtn = Button.builder(Component.literal("Materials"), b -> {
+            if (SchematicPlacement.getActiveSchematic() != null) {
+                this.minecraft.setScreen(new GuiSchematicMaterials(this));
+            }
+        }).bounds(utilX, startY + (rowSpacing * 3), 85, 20).build();
+        // REMOVED: materialsBtn.active = false;
         this.addRenderableWidget(materialsBtn);
 
         // Row 5: Printer
@@ -158,7 +166,8 @@ public class GuiSchematicControl extends Screen {
         SchematicPlacement.LayerMode current = SchematicPlacement.getLayerMode();
         SchematicPlacement.LayerMode next = switch (current) {
             case ALL -> SchematicPlacement.LayerMode.ALL_BELOW;
-            case ALL_BELOW -> SchematicPlacement.LayerMode.SINGLE_LAYER;
+            case ALL_BELOW -> SchematicPlacement.LayerMode.ALL_ABOVE; // ADDED: transition to ALL_ABOVE
+            case ALL_ABOVE -> SchematicPlacement.LayerMode.SINGLE_LAYER; // ADDED: transition to SINGLE_LAYER
             case SINGLE_LAYER -> SchematicPlacement.LayerMode.ALL;
         };
         SchematicPlacement.setLayerMode(next);
@@ -177,6 +186,7 @@ public class GuiSchematicControl extends Screen {
         String modeLabel = switch (mode) {
             case ALL -> "Layers: ALL";
             case ALL_BELOW -> "Layers: BELOW";
+            case ALL_ABOVE -> "Layers: ABOVE"; // ADDED: Label for ALL_ABOVE
             case SINGLE_LAYER -> "Layers: SINGLE";
         };
         this.layerModeBtn.setMessage(Component.literal(modeLabel));

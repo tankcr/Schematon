@@ -41,6 +41,11 @@ public class SchematicRenderer {
             return;
         }
 
+        // ADDED: Skip rendering if the schematic is hidden
+        if (SchematicPlacement.isHidden()) {
+            return;
+        }
+
         if (dirty || cachedBuffer == null) {
             rebuildBuffer(virtualLevel);
             dirty = false;
@@ -83,6 +88,9 @@ public class SchematicRenderer {
         // 2. Render crisp cyan wireframe safely (bypassing RenderType.lines() shader bugs)
         renderBoundingBox(poseStack, virtualLevel.getSchematic().getSize());
 
+        // 3. Render Red/Green Placement Validation Highlights
+        renderValidationOverlays(poseStack, virtualLevel, origin);
+
         poseStack.popPose();
     }
 
@@ -107,6 +115,8 @@ public class SchematicRenderer {
         for (int y = 0; y < size.getY(); y++) {
             if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
             if (mode == SchematicPlacement.LayerMode.ALL_BELOW && y > activeLayerY) continue;
+            // ADDED: Logic for ALL_ABOVE layer mode
+            if (mode == SchematicPlacement.LayerMode.ALL_ABOVE && y < activeLayerY) continue;
 
             for (int z = 0; z < size.getZ(); z++) {
                 for (int x = 0; x < size.getX(); x++) {
@@ -192,5 +202,100 @@ public class SchematicRenderer {
             cachedBuffer.close();
             cachedBuffer = null;
         }
+    }
+
+    // TODO: Link this to a toggle button in GuiSchematicControl later
+    public static boolean renderExcavations = true;
+
+    private static void renderValidationOverlays(PoseStack poseStack, VirtualSchematicLevel virtualLevel, BlockPos origin) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+
+        SchematicData data = virtualLevel.getSchematic();
+        Vec3i size = data.getSize();
+        SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
+        int activeLayerY = SchematicPlacement.getLayerY();
+
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        // Keep depth test ON so highlights don't blindly shine through walls (keeps it minimal)
+        RenderSystem.enableDepthTest();
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+
+        Tesselator tesselator = Tesselator.getInstance();
+        BufferBuilder builder = tesselator.getBuilder();
+        builder.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+
+        Matrix4f matrix = poseStack.last().pose();
+
+        for (int y = 0; y < size.getY(); y++) {
+            if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
+            if (mode == SchematicPlacement.LayerMode.ALL_BELOW && y > activeLayerY) continue;
+            if (mode == SchematicPlacement.LayerMode.ALL_ABOVE && y < activeLayerY) continue;
+
+            for (int z = 0; z < size.getZ(); z++) {
+                for (int x = 0; x < size.getX(); x++) {
+                    BlockState schState = data.getBlockState(x, y, z);
+                    BlockPos worldPos = origin.offset(x, y, z);
+                    BlockState worldState = mc.level.getBlockState(worldPos);
+
+                    // 1. Air (Schem) + Air (World) -> Perfect match, do nothing.
+                    if (schState.isAir() && worldState.isAir()) {
+                        continue;
+                    }
+
+                    // 2. Block (Schem) + Air (World) -> Needs building. Ghost block handles this, no overlay needed.
+                    if (!schState.isAir() && worldState.isAir()) {
+                        continue;
+                    }
+
+                    // 3. Air (Schem) + Block/Fluid (World) -> Needs excavation/clearing.
+                    if (schState.isAir() && !worldState.isAir()) {
+                        if (renderExcavations) {
+                            // Magenta for excavation: R=1.0, G=0.0, B=1.0
+                            drawMinimalHighlightBox(builder, matrix, x, y, z, 1.0f, 0.0f, 1.0f, 0.6f);
+                        }
+                        continue;
+                    }
+
+                    // 4. Block (Schem) + Block/Fluid (World) -> Physical collision. Check for a match.
+                    // (Using schState.getBlock() == worldState.getBlock() to ignore orientation/facing per your snippet)
+                    boolean isMatch = (schState.getBlock() == worldState.getBlock());
+
+                    float r = isMatch ? 0.2f : 1.0f;
+                    float g = isMatch ? 1.0f : 0.2f;
+                    float b = 0.2f;
+                    float a = 0.6f; // Faint transparency to keep it minimal
+
+                    drawMinimalHighlightBox(builder, matrix, x, y, z, r, g, b, a);
+                }
+            }
+        }
+
+        tesselator.end();
+    }
+    private static void drawMinimalHighlightBox(BufferBuilder builder, Matrix4f matrix, int x, int y, int z, float r, float g, float b, float a) {
+        // Inflate slightly (0.005) to prevent Z-fighting/flickering against solid block textures
+        float min = -0.005f;
+        float max = 1.005f;
+
+        float x1 = x + min, y1 = y + min, z1 = z + min;
+        float x2 = x + max, y2 = y + max, z2 = z + max;
+
+        // Bottom
+        addLine(builder, matrix, x1, y1, z1, x2, y1, z1, r, g, b, a);
+        addLine(builder, matrix, x2, y1, z1, x2, y1, z2, r, g, b, a);
+        addLine(builder, matrix, x2, y1, z2, x1, y1, z2, r, g, b, a);
+        addLine(builder, matrix, x1, y1, z2, x1, y1, z1, r, g, b, a);
+        // Top
+        addLine(builder, matrix, x1, y2, z1, x2, y2, z1, r, g, b, a);
+        addLine(builder, matrix, x2, y2, z1, x2, y2, z2, r, g, b, a);
+        addLine(builder, matrix, x2, y2, z2, x1, y2, z2, r, g, b, a);
+        addLine(builder, matrix, x1, y2, z2, x1, y2, z1, r, g, b, a);
+        // Sides
+        addLine(builder, matrix, x1, y1, z1, x1, y2, z1, r, g, b, a);
+        addLine(builder, matrix, x2, y1, z1, x2, y2, z1, r, g, b, a);
+        addLine(builder, matrix, x2, y1, z2, x2, y2, z2, r, g, b, a);
+        addLine(builder, matrix, x1, y1, z2, x1, y2, z2, r, g, b, a);
     }
 }

@@ -5,7 +5,7 @@ import tankcmod.schematon.client.render.SchematicRenderer;
 
 public class SchematicPlacement {
     public enum LayerMode {
-        ALL, ALL_BELOW, SINGLE_LAYER
+        ALL, ALL_BELOW, ALL_ABOVE, SINGLE_LAYER // ADDED: ALL_ABOVE
     }
 
     private static VirtualSchematicLevel activeSchematic = null;
@@ -13,6 +13,7 @@ public class SchematicPlacement {
 
     private static LayerMode layerMode = LayerMode.ALL;
     private static int layerY = 0;
+    private static boolean hidden = false; // ADDED: hidden state
 
     public static void setActiveSchematic(VirtualSchematicLevel level) {
         activeSchematic = level;
@@ -55,5 +56,14 @@ public class SchematicPlacement {
             layerY = y;
             SchematicRenderer.markDirty();
         }
+    }
+
+    // ADDED: Getters and setters for hidden state
+    public static boolean isHidden() {
+        return hidden;
+    }
+
+    public static void setHidden(boolean state) {
+        hidden = state;
     }
 }
