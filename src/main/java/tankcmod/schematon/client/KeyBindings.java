@@ -25,4 +25,10 @@ public class KeyBindings {
             GLFW.GLFW_KEY_KP_DIVIDE,
             CATEGORY
     );
+    public static final KeyMapping TOGGLE_MATERIALS_KEY = new KeyMapping(
+            "key.schematon.toggle_materials",
+            InputConstants.Type.KEYSYM,
+            GLFW.GLFW_KEY_KP_MULTIPLY,
+            "key.categories.schematon"
+    );
 }

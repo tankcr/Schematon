@@ -61,13 +61,35 @@ public class GuiSchematicMaterials extends Screen {
         this.listWidget.setRenderTopAndBottom(false);
         this.addWidget(this.listWidget);
 
-        // Compact Back button anchored right above the panel (mirrors Expand Menu in GuiSchematicControl)
+        // Compact Back button anchored right above the panel
         this.addRenderableWidget(
                 Button.builder(Component.literal("Back"), b -> {
                     if (this.minecraft != null) {
                         this.minecraft.setScreen(this.parent);
                     }
                 }).bounds(this.panelX, this.panelY - 24, 70, 20).build()
+        );
+        // Printer toggle button right next to Pin HUD
+        this.addRenderableWidget(
+                Button.builder(
+                        Component.literal(SchematicPlacement.isPrinterEnabled() ? "Printer: ON" : "Printer: OFF"),
+                        b -> {
+                            SchematicPlacement.togglePrinter();
+                            b.setMessage(Component.literal(
+                                    SchematicPlacement.isPrinterEnabled() ? "Printer: ON" : "Printer: OFF"
+                            ));
+                        }
+                ).bounds(this.panelX + 148, this.panelY - 24, 92, 20).build()
+        );
+        // Pin HUD button right next to Back
+        this.addRenderableWidget(
+                Button.builder(Component.literal("Pin HUD"), b -> {
+                    SchematicPlacement.setShowMaterialsHud(true);
+                    MaterialsHudOverlay.refreshCache();
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(null);
+                    }
+                }).bounds(this.panelX + 74, this.panelY - 24, 70, 20).build()
         );
 
         calculateMaterials();

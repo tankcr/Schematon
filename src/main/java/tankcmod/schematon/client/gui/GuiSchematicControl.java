@@ -8,6 +8,10 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import tankcmod.schematon.world.SchematicPlacement;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import tankcmod.schematon.world.SchematicPaster;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,7 +69,18 @@ public class GuiSchematicControl extends Screen {
 
         this.addRenderableWidget(Button.builder(Component.literal("Move Here"), b -> {
             if (this.minecraft != null && this.minecraft.player != null) {
-                SchematicPlacement.setOrigin(this.minecraft.player.blockPosition());
+                var active = SchematicPlacement.getActiveSchematic();
+                if (active != null) {
+                    SchematicPlacement.setOrigin(
+                            SchematicPlacement.calculateFrontOrigin(
+                                    this.minecraft.player,
+                                    active.getSchematic().getSize(),
+                                    2
+                            )
+                    );
+                } else {
+                    SchematicPlacement.setOrigin(this.minecraft.player.blockPosition());
+                }
                 syncBoxesFromPlacement();
                 setCompactMoveMode(true);
             }
@@ -80,7 +95,7 @@ public class GuiSchematicControl extends Screen {
         // --- RIGHT EDGE: Utilities & Slicing (Hidden in Compact Mode) ---
         int utilW = 85;
         int utilX = this.width - utilW - margin;
-        int utilStartY = (this.height - (rowSpacing * 6)) / 2;
+        int utilStartY = (this.height - (rowSpacing * 7)) / 2;
 
         // Row 1: Unload (Half Width) & Hide/Show (Half Width)
         addFullModeWidget(Button.builder(Component.literal("Unload"), b -> {
@@ -127,11 +142,14 @@ public class GuiSchematicControl extends Screen {
             }
         }).bounds(utilX, utilStartY + (rowSpacing * 3), utilW, 20).build());
 
-        // Row 5: Printer
-        Button printerBtn = Button.builder(Component.literal("Printer: OFF"), b -> {})
-                .bounds(utilX, utilStartY + (rowSpacing * 4), utilW, 20).build();
-        printerBtn.active = false;
-        addFullModeWidget(printerBtn);
+        // Row 5: Printer Toggle (ENABLED)
+        addFullModeWidget(Button.builder(
+                Component.literal(getPrinterButtonText()),
+                b -> {
+                    SchematicPlacement.togglePrinter();
+                    b.setMessage(Component.literal(getPrinterButtonText()));
+                }
+        ).bounds(utilX, utilStartY + (rowSpacing * 4), utilW, 20).build());
 
         // Row 6: Excavation Toggle
         addFullModeWidget(Button.builder(
@@ -142,6 +160,17 @@ public class GuiSchematicControl extends Screen {
                 }
         ).bounds(utilX, utilStartY + (rowSpacing * 5), utilW, 20).build());
 
+        // Row 7: Creative-Only Paste
+        boolean canPaste = this.minecraft != null
+                && this.minecraft.player != null
+                && this.minecraft.player.isCreative()
+                && SchematicPlacement.getActiveSchematic() != null;
+
+        Button pasteBtn = Button.builder(Component.literal("Paste"), b -> executeCreativePaste())
+                .bounds(utilX, utilStartY + (rowSpacing * 6), utilW, 20)
+                .build();
+        pasteBtn.active = canPaste;
+        addFullModeWidget(pasteBtn);
 
         // --- BOTTOM CENTER: Done (Hidden in Compact Mode; Esc still closes) ---
         addFullModeWidget(Button.builder(Component.literal("Done"), b -> {
@@ -173,7 +202,47 @@ public class GuiSchematicControl extends Screen {
     private String getExcavationButtonText() {
         return SchematicPlacement.isExcavateAir() ? "Excavate: ON" : "Excavate: OFF";
     }
+    private String getPrinterButtonText() {
+        return SchematicPlacement.isPrinterEnabled() ? "Printer: ON" : "Printer: OFF";
+    }
 
+    private void executeCreativePaste() {
+        if (this.minecraft == null || this.minecraft.player == null) return;
+        var active = SchematicPlacement.getActiveSchematic();
+        if (active == null) return;
+
+        MinecraftServer server = this.minecraft.getSingleplayerServer();
+        if (server == null) {
+            this.minecraft.player.displayClientMessage(
+                    Component.literal("Paste on dedicated servers requires a network packet (coming soon)."),
+                    true
+            );
+            return;
+        }
+
+        // Snapshot client state before hopping to the server thread
+        var data = active.getSchematic();
+        BlockPos origin = SchematicPlacement.getOrigin();
+        SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
+        int layerY = SchematicPlacement.getLayerY();
+        boolean excavateAir = SchematicPlacement.isExcavateAir();
+        var dim = this.minecraft.player.level().dimension();
+        var playerUuid = this.minecraft.player.getUUID();
+
+        server.execute(() -> {
+            ServerLevel serverLevel = server.getLevel(dim);
+            ServerPlayer serverPlayer = server.getPlayerList().getPlayer(playerUuid);
+            if (serverLevel == null || serverPlayer == null) return;
+
+            // TODO: Pass blockEntityTags map from SchematicData once exposed
+            SchematicPaster.PasteResult result = SchematicPaster.pasteVisibleLayers(
+                    serverLevel, serverPlayer, data, null, origin, mode, layerY, excavateAir
+            );
+            serverPlayer.displayClientMessage(Component.literal(result.message()), true);
+        });
+
+        this.minecraft.setScreen(null);
+    }
     private EditBox createAxisRow(String label, int x, int y, int axisIndex) {
         int btnWidth = 20;
         int boxWidth = 66;

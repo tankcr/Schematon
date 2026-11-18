@@ -7,11 +7,18 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.client.model.data.ModelData;
 import net.minecraftforge.registries.ForgeRegistries;
+
+import javax.annotation.Nullable;
 
 public class AE2Compat implements ISchematicCompat {
     @Override
@@ -38,6 +45,36 @@ public class AE2Compat implements ISchematicCompat {
     @Override
     public ModelData getModelData(BlockEntity be) {
         return be.getModelData();
+    }
+
+    @Override
+    public ItemStack getRequiredItem(BlockState state, @Nullable BlockEntity virtualBe, @Nullable CompoundTag beTag) {
+        ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(state.getBlock());
+        if (blockId != null && "cable_bus".equals(blockId.getPath())) {
+            CompoundTag tag = beTag != null ? beTag : (virtualBe != null ? virtualBe.saveWithoutMetadata() : null);
+            if (tag != null && tag.contains("cable", Tag.TAG_COMPOUND)) {
+                CompoundTag cableTag = tag.getCompound("cable");
+                if (cableTag.contains("id", Tag.TAG_STRING)) {
+                    ResourceLocation itemId = ResourceLocation.tryParse(cableTag.getString("id"));
+                    if (itemId != null) {
+                        Item cableItem = ForgeRegistries.ITEMS.getValue(itemId);
+                        if (cableItem != null && cableItem != Items.AIR) {
+                            return new ItemStack(cableItem);
+                        }
+                    }
+                }
+            }
+        }
+        return ISchematicCompat.super.getRequiredItem(state, virtualBe, beTag);
+    }
+
+    @Override
+    public void onBlockEntityPasted(BlockEntity targetBe, CompoundTag appliedTag, BlockPos worldPos, ServerLevel level) {
+        targetBe.setChanged();
+        BlockState state = targetBe.getBlockState();
+        level.sendBlockUpdated(worldPos, state, state, Block.UPDATE_ALL);
+        // Notify adjacent AE2 cables/machines so the ME grid reforms immediately
+        level.updateNeighborsAt(worldPos, state.getBlock());
     }
 
     private void ensureCableConnections(CompoundTag tag, BlockPos localPos, BlockAndTintGetter level) {
