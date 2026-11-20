@@ -7,6 +7,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import tankcmod.schematon.compat.CompatManager;
@@ -19,23 +20,17 @@ public class SchematicPaster {
 
     public record PasteResult(boolean success, int blocksPlaced, int blocksExcavated, int blockEntitiesRestored, String message) {}
 
-    /**
-     * Pastes the visible layer(s) of a schematic directly into the ServerLevel,
-     * restoring modded BlockEntity NBT via CompatManager.
-     *
-     * @param blockEntityTags Optional map of local schematic BlockPos -> raw BlockEntity CompoundTag.
-     */
     public static PasteResult pasteVisibleLayers(
             ServerLevel level,
             ServerPlayer player,
             SchematicData data,
             @Nullable Map<BlockPos, CompoundTag> blockEntityTags,
             BlockPos origin,
+            Rotation rotation,
             SchematicPlacement.LayerMode mode,
             int activeLayerY,
             boolean excavateAir
     ) {
-        // Strict server-side Creative check
         if (!player.isCreative()) {
             return new PasteResult(false, 0, 0, 0, "Paste is only available in Creative mode.");
         }
@@ -44,26 +39,27 @@ public class SchematicPaster {
             return new PasteResult(false, 0, 0, 0, "No schematic data to paste.");
         }
 
+        Rotation effectiveRotation = (rotation != null) ? rotation : Rotation.NONE;
         Vec3i size = data.getSize();
+        Vec3i rotatedSize = SchematicPlacement.getRotatedSize(size, effectiveRotation);
         int placed = 0;
         int excavated = 0;
         int blockEntitiesRestored = 0;
 
-        // UPDATE_CLIENTS | UPDATE_KNOWN_SHAPE prevents cascading neighbor physics mid-paste
         int setBlockFlags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE;
-        BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
 
-        for (int y = 0; y < size.getY(); y++) {
+        for (int y = 0; y < rotatedSize.getY(); y++) {
             if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
             if (mode == SchematicPlacement.LayerMode.ALL_BELOW && y > activeLayerY) continue;
             if (mode == SchematicPlacement.LayerMode.ALL_ABOVE && y < activeLayerY) continue;
 
-            for (int z = 0; z < size.getZ(); z++) {
-                for (int x = 0; x < size.getX(); x++) {
-                    BlockState schState = data.getBlockState(x, y, z);
-                    BlockPos worldPos = origin.offset(x, y, z);
+            for (int rz = 0; rz < rotatedSize.getZ(); rz++) {
+                for (int rx = 0; rx < rotatedSize.getX(); rx++) {
+                    BlockPos sourcePos = SchematicPlacement.untransformToSourcePos(rx, y, rz, size, effectiveRotation);
+                    BlockState rawState = data.getBlockState(sourcePos.getX(), sourcePos.getY(), sourcePos.getZ());
+                    BlockState schState = SchematicPlacement.applyRotation(rawState, effectiveRotation);
+                    BlockPos worldPos = origin.offset(rx, y, rz);
 
-                    // Skip unloaded chunks to avoid stalling the server thread
                     if (!level.isLoaded(worldPos)) {
                         continue;
                     }
@@ -78,16 +74,13 @@ public class SchematicPaster {
                         continue;
                     }
 
-                    // Place block if state differs
                     if (!currentWorldState.equals(schState)) {
                         level.setBlock(worldPos, schState, setBlockFlags);
                         placed++;
                     }
 
-                    // Restore BlockEntity NBT through CompatManager if present
                     if (blockEntityTags != null && !blockEntityTags.isEmpty()) {
-                        localPos.set(x, y, z);
-                        CompoundTag rawTag = blockEntityTags.get(localPos);
+                        CompoundTag rawTag = blockEntityTags.get(sourcePos);
                         if (rawTag != null) {
                             BlockEntity targetBe = level.getBlockEntity(worldPos);
                             if (targetBe != null) {

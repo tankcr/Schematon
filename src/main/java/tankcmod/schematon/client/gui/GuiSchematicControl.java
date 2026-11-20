@@ -7,11 +7,12 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import tankcmod.schematon.world.SchematicPlacement;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.Rotation;
 import tankcmod.schematon.world.SchematicPaster;
+import tankcmod.schematon.world.SchematicPlacement;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,9 +56,9 @@ public class GuiSchematicControl extends Screen {
         int rowSpacing = 24;
         int margin = 12;
 
-        // --- BOTTOM-LEFT PANEL: Coordinates (Permanent Anchor, Zero Cursor-Chase) ---
+        // --- BOTTOM-LEFT PANEL: Coordinates, Move Here & Rotate (Visible in BOTH Full & Compact Move Modes) ---
         this.movePanelW = 148;
-        this.movePanelH = (rowSpacing * 4) + 12; // 3 axis rows + Move Here + padding
+        this.movePanelH = (rowSpacing * 4) + 12; // 3 axis rows + Move/Rotate row + padding
         this.movePanelX = margin;
         this.movePanelY = this.height - this.movePanelH - margin;
         this.moveRowX = this.movePanelX + 8;
@@ -67,6 +68,7 @@ public class GuiSchematicControl extends Screen {
         this.yBox = createAxisRow("Y:", this.moveRowX, this.moveStartY + rowSpacing, 1);
         this.zBox = createAxisRow("Z:", this.moveRowX, this.moveStartY + (rowSpacing * 2), 2);
 
+        // Row 4: Move Here (62px) + Rotate (49px) = 114px total
         this.addRenderableWidget(Button.builder(Component.literal("Move Here"), b -> {
             if (this.minecraft != null && this.minecraft.player != null) {
                 var active = SchematicPlacement.getActiveSchematic();
@@ -84,7 +86,31 @@ public class GuiSchematicControl extends Screen {
                 syncBoxesFromPlacement();
                 setCompactMoveMode(true);
             }
-        }).bounds(this.moveRowX + 18, this.moveStartY + (rowSpacing * 3), 114, 20).build());
+        }).bounds(this.moveRowX + 18, this.moveStartY + (rowSpacing * 3), 62, 20).build());
+
+        this.addRenderableWidget(Button.builder(
+                Component.literal("Rot: " + SchematicPlacement.getRotationLabel(SchematicPlacement.getRotation())),
+                b -> {
+                    if (hasShiftDown()) {
+                        SchematicPlacement.rotateCounterClockwise();
+                    } else {
+                        SchematicPlacement.rotateClockwise();
+                    }
+                    b.setMessage(Component.literal("Rot: " + SchematicPlacement.getRotationLabel(SchematicPlacement.getRotation())));
+                }
+        ).bounds(this.moveRowX + 83, this.moveStartY + (rowSpacing * 3), 49, 20).build());
+
+        this.addRenderableWidget(Button.builder(
+                Component.literal(getRotateButtonText()),
+                b -> {
+                    if (hasShiftDown()) {
+                        SchematicPlacement.rotateCounterClockwise();
+                    } else {
+                        SchematicPlacement.rotateClockwise();
+                    }
+                    b.setMessage(Component.literal(getRotateButtonText()));
+                }
+        ).bounds(this.moveRowX + 83, this.moveStartY + (rowSpacing * 3), 49, 20).build());
 
         // Compact-only button to restore the full menu
         this.expandBtn = this.addRenderableWidget(Button.builder(Component.literal("Expand Menu"), b -> {
@@ -142,7 +168,7 @@ public class GuiSchematicControl extends Screen {
             }
         }).bounds(utilX, utilStartY + (rowSpacing * 3), utilW, 20).build());
 
-        // Row 5: Printer Toggle (ENABLED)
+        // Row 5: Printer Toggle
         addFullModeWidget(Button.builder(
                 Component.literal(getPrinterButtonText()),
                 b -> {
@@ -199,9 +225,14 @@ public class GuiSchematicControl extends Screen {
         }
     }
 
+    private String getRotateButtonText() {
+        return "Rot: " + SchematicPlacement.getRotationLabel(SchematicPlacement.getRotation());
+    }
+
     private String getExcavationButtonText() {
         return SchematicPlacement.isExcavateAir() ? "Excavate: ON" : "Excavate: OFF";
     }
+
     private String getPrinterButtonText() {
         return SchematicPlacement.isPrinterEnabled() ? "Printer: ON" : "Printer: OFF";
     }
@@ -214,7 +245,7 @@ public class GuiSchematicControl extends Screen {
         MinecraftServer server = this.minecraft.getSingleplayerServer();
         if (server == null) {
             this.minecraft.player.displayClientMessage(
-                    Component.literal("Paste on dedicated servers requires a network packet (coming soon)."),
+                    Component.literal("Paste on dedicated servers requires the server side mod to be present"),
                     true
             );
             return;
@@ -223,6 +254,7 @@ public class GuiSchematicControl extends Screen {
         // Snapshot client state before hopping to the server thread
         var data = active.getSchematic();
         BlockPos origin = SchematicPlacement.getOrigin();
+        var rotation = SchematicPlacement.getRotation();
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
         int layerY = SchematicPlacement.getLayerY();
         boolean excavateAir = SchematicPlacement.isExcavateAir();
@@ -236,13 +268,14 @@ public class GuiSchematicControl extends Screen {
 
             // TODO: Pass blockEntityTags map from SchematicData once exposed
             SchematicPaster.PasteResult result = SchematicPaster.pasteVisibleLayers(
-                    serverLevel, serverPlayer, data, null, origin, mode, layerY, excavateAir
+                    serverLevel, serverPlayer, data, null, origin, rotation, mode, layerY, excavateAir
             );
             serverPlayer.displayClientMessage(Component.literal(result.message()), true);
         });
 
         this.minecraft.setScreen(null);
     }
+
     private EditBox createAxisRow(String label, int x, int y, int axisIndex) {
         int btnWidth = 20;
         int boxWidth = 66;
@@ -366,20 +399,20 @@ public class GuiSchematicControl extends Screen {
         int rowSpacing = 24;
 
         if (!this.compactMoveMode) {
-            // Full menu: subtle dark backdrop + header info
             this.renderBackground(graphics);
 
             graphics.drawCenteredString(this.font, this.title, centerX, 12, 0xFFFFFF);
 
             var active = SchematicPlacement.getActiveSchematic();
             if (active != null) {
-                String info = active.getSchematic().getName() + " (" + active.getSchematic().getSize().toShortString() + ")";
+                String info = active.getSchematic().getName()
+                        + " (" + active.getSchematic().getSize().toShortString() + ")"
+                        + " [" + SchematicPlacement.getRotationLabel(SchematicPlacement.getRotation()) + "]";
                 graphics.drawCenteredString(this.font, info, centerX, 25, 0x55FFFF);
             } else {
                 graphics.drawCenteredString(this.font, "No schematic loaded", centerX, 25, 0xFF5555);
             }
         } else {
-            // Compact Move Mode: 70% transparent (30% alpha = 0x4D) backdrop strictly behind the X/Y/Z panel
             graphics.fill(
                     this.movePanelX - 2,
                     this.movePanelY - 2,
@@ -389,7 +422,6 @@ public class GuiSchematicControl extends Screen {
             );
         }
 
-        // Axis labels (always visible in the bottom-left Move Panel)
         graphics.drawString(this.font, "X:", this.moveRowX, this.moveStartY + 6, 0xFF5555);
         graphics.drawString(this.font, "Y:", this.moveRowX, this.moveStartY + rowSpacing + 6, 0x55FF55);
         graphics.drawString(this.font, "Z:", this.moveRowX, this.moveStartY + (rowSpacing * 2) + 6, 0x5555FF);

@@ -71,8 +71,7 @@ public class SchematicPrinter {
     }
 
     private static boolean tryPlaceNextBlock(Minecraft mc, LocalPlayer player, VirtualSchematicLevel virtualLevel) {
-        SchematicData data = virtualLevel.getSchematic();
-        Vec3i size = data.getSize();
+        Vec3i size = virtualLevel.getRotatedSize();
         BlockPos origin = SchematicPlacement.getOrigin();
 
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
@@ -98,11 +97,11 @@ public class SchematicPrinter {
 
             for (int z = minZ; z <= maxZ; z++) {
                 for (int x = minX; x <= maxX; x++) {
-                    BlockState schState = data.getBlockState(x, y, z);
+                    localPos.set(x, y, z);
+                    BlockState schState = virtualLevel.getBlockState(localPos);
                     if (schState.isAir()) continue;
 
                     // Resolve item through CompatManager so modded NBT blocks (e.g. AE2 cables) work
-                    localPos.set(x, y, z);
                     BlockEntity virtualBe = virtualLevel.getBlockEntity(localPos);
                     ItemStack requiredStack = CompatManager.getRequiredItem(schState, virtualBe, null);
                     if (requiredStack.isEmpty()) continue;

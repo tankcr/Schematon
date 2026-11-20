@@ -87,8 +87,7 @@ public class MaterialsHudOverlay {
         }
 
         // 2. Scan active schematic slice against world blocks
-        SchematicData data = virtualLevel.getSchematic();
-        Vec3i size = data.getSize();
+        Vec3i size = virtualLevel.getRotatedSize();
         BlockPos origin = SchematicPlacement.getOrigin();
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
         int activeLayerY = SchematicPlacement.getLayerY();
@@ -97,6 +96,7 @@ public class MaterialsHudOverlay {
         Map<Item, int[]> counts = new HashMap<>();
         int total = 0;
         int remaining = 0;
+        BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
 
         for (int y = 0; y < size.getY(); y++) {
             if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
@@ -105,7 +105,8 @@ public class MaterialsHudOverlay {
 
             for (int z = 0; z < size.getZ(); z++) {
                 for (int x = 0; x < size.getX(); x++) {
-                    BlockState schState = data.getBlockState(x, y, z);
+                    localPos.set(x, y, z);
+                    BlockState schState = virtualLevel.getBlockState(localPos);
                     if (schState.isAir()) continue;
 
                     Item item = schState.getBlock().asItem();

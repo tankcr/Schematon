@@ -71,6 +71,12 @@ public class SchematicRenderer {
 
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
+            // Keep depth TEST on (so terrain occludes the hologram), but disable depth WRITE
+            // so unsorted translucent quads never occlude other ghost faces behind them
+            RenderSystem.depthMask(false);
+            // Pull ghost quads a hair toward the camera to prevent Z-fighting on coplanar faces
+            RenderSystem.enablePolygonOffset();
+            RenderSystem.polygonOffset(-1.0f, -1.0f);
             RenderSystem.setShaderColor(0.85f, 0.92f, 1.0f, GHOST_ALPHA);
 
             Matrix4f modelView = poseStack.last().pose();
@@ -80,13 +86,17 @@ public class SchematicRenderer {
             cachedBuffer.drawWithShader(modelView, projection, GameRenderer.getRendertypeTranslucentShader());
             VertexBuffer.unbind();
 
+            // Always restore GL state before clearing RenderState
+            RenderSystem.polygonOffset(0.0f, 0.0f);
+            RenderSystem.disablePolygonOffset();
+            RenderSystem.depthMask(true);
             RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
             RenderSystem.disableBlend();
             translucent.clearRenderState();
         }
 
-        // 2. Render crisp cyan wireframe safely (bypassing RenderType.lines() shader bugs)
-        renderBoundingBox(poseStack, virtualLevel.getSchematic().getSize());
+        // 2. Render crisp cyan wireframe using ROTATED dimensions
+        renderBoundingBox(poseStack, virtualLevel.getRotatedSize());
 
         // 3. Render Red/Green Placement Validation Highlights
         renderValidationOverlays(poseStack, virtualLevel, origin);
@@ -99,8 +109,7 @@ public class SchematicRenderer {
 
         Minecraft mc = Minecraft.getInstance();
         BlockRenderDispatcher blockRenderer = mc.getBlockRenderer();
-        SchematicData data = virtualLevel.getSchematic();
-        Vec3i size = data.getSize();
+        Vec3i size = virtualLevel.getRotatedSize();
 
         BufferBuilder builder = Tesselator.getInstance().getBuilder();
         builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
@@ -115,13 +124,13 @@ public class SchematicRenderer {
         for (int y = 0; y < size.getY(); y++) {
             if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
             if (mode == SchematicPlacement.LayerMode.ALL_BELOW && y > activeLayerY) continue;
-            // ADDED: Logic for ALL_ABOVE layer mode
             if (mode == SchematicPlacement.LayerMode.ALL_ABOVE && y < activeLayerY) continue;
 
             for (int z = 0; z < size.getZ(); z++) {
                 for (int x = 0; x < size.getX(); x++) {
                     cursor.set(x, y, z);
-                    BlockState state = data.getBlockState(cursor);
+                    // VirtualSchematicLevel maps rotated (x, y, z) to source coords & rotates the BlockState
+                    BlockState state = virtualLevel.getBlockState(cursor);
 
                     if (state.isAir() || state.getRenderShape() == RenderShape.INVISIBLE) {
                         continue;
@@ -208,10 +217,10 @@ public class SchematicRenderer {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return;
 
-        SchematicData data = virtualLevel.getSchematic();
-        Vec3i size = data.getSize();
+        Vec3i size = virtualLevel.getRotatedSize();
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
         int activeLayerY = SchematicPlacement.getLayerY();
+        BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
 
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
@@ -232,7 +241,8 @@ public class SchematicRenderer {
 
             for (int z = 0; z < size.getZ(); z++) {
                 for (int x = 0; x < size.getX(); x++) {
-                    BlockState schState = data.getBlockState(x, y, z);
+                    localPos.set(x, y, z);
+                    BlockState schState = virtualLevel.getBlockState(localPos);
                     BlockPos worldPos = origin.offset(x, y, z);
                     BlockState worldState = mc.level.getBlockState(worldPos);
 

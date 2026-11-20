@@ -101,8 +101,7 @@ public class GuiSchematicMaterials extends Screen {
             return;
         }
 
-        SchematicData data = virtualLevel.getSchematic();
-        Vec3i size = data.getSize();
+        Vec3i size = virtualLevel.getRotatedSize();
         BlockPos origin = SchematicPlacement.getOrigin();
 
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
@@ -112,6 +111,7 @@ public class GuiSchematicMaterials extends Screen {
         Map<Item, int[]> materialCounts = new HashMap<>();
         this.totalBlocks = 0;
         this.remainingBlocks = 0;
+        BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
 
         for (int y = 0; y < size.getY(); y++) {
             if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
@@ -120,7 +120,8 @@ public class GuiSchematicMaterials extends Screen {
 
             for (int z = 0; z < size.getZ(); z++) {
                 for (int x = 0; x < size.getX(); x++) {
-                    BlockState schState = data.getBlockState(x, y, z);
+                    localPos.set(x, y, z);
+                    BlockState schState = virtualLevel.getBlockState(localPos);
                     if (schState.isAir()) continue;
 
                     Item item = schState.getBlock().asItem();
