@@ -6,16 +6,25 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Vec3i;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import tankcmod.schematon.network.PasteSchematicPacket;
+import tankcmod.schematon.network.SchematonNetwork;
 import tankcmod.schematon.world.SchematicPaster;
 import tankcmod.schematon.world.SchematicPlacement;
+import tankcmod.schematon.world.VirtualSchematicLevel;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class GuiSchematicControl extends Screen {
     private EditBox xBox;
@@ -87,18 +96,6 @@ public class GuiSchematicControl extends Screen {
                 setCompactMoveMode(true);
             }
         }).bounds(this.moveRowX + 18, this.moveStartY + (rowSpacing * 3), 62, 20).build());
-
-        this.addRenderableWidget(Button.builder(
-                Component.literal("Rot: " + SchematicPlacement.getRotationLabel(SchematicPlacement.getRotation())),
-                b -> {
-                    if (hasShiftDown()) {
-                        SchematicPlacement.rotateCounterClockwise();
-                    } else {
-                        SchematicPlacement.rotateClockwise();
-                    }
-                    b.setMessage(Component.literal("Rot: " + SchematicPlacement.getRotationLabel(SchematicPlacement.getRotation())));
-                }
-        ).bounds(this.moveRowX + 83, this.moveStartY + (rowSpacing * 3), 49, 20).build());
 
         this.addRenderableWidget(Button.builder(
                 Component.literal(getRotateButtonText()),
@@ -186,10 +183,9 @@ public class GuiSchematicControl extends Screen {
                 }
         ).bounds(utilX, utilStartY + (rowSpacing * 5), utilW, 20).build());
 
-        // Row 7: Creative-Only Paste
+        // Row 7: Paste (enforced by server config AllowPaste)
         boolean canPaste = this.minecraft != null
                 && this.minecraft.player != null
-                && this.minecraft.player.isCreative()
                 && SchematicPlacement.getActiveSchematic() != null;
 
         Button pasteBtn = Button.builder(Component.literal("Paste"), b -> executeCreativePaste())
@@ -242,8 +238,37 @@ public class GuiSchematicControl extends Screen {
         var active = SchematicPlacement.getActiveSchematic();
         if (active == null) return;
 
+        var data = active.getSchematic();
+        BlockPos origin = SchematicPlacement.getOrigin();
+        var rotation = SchematicPlacement.getRotation();
+        SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
+        int layerY = SchematicPlacement.getLayerY();
+        boolean excavateAir = SchematicPlacement.isExcavateAir();
+
         MinecraftServer server = this.minecraft.getSingleplayerServer();
-        if (server == null) {
+        if (server != null) {
+            var dim = this.minecraft.player.level().dimension();
+            var playerUuid = this.minecraft.player.getUUID();
+
+            server.execute(() -> {
+                ServerLevel serverLevel = server.getLevel(dim);
+                ServerPlayer serverPlayer = server.getPlayerList().getPlayer(playerUuid);
+                if (serverLevel == null || serverPlayer == null) return;
+
+                SchematicPaster.PasteResult result = SchematicPaster.pasteVisibleLayers(
+                        serverLevel, serverPlayer, data, data.getBlockEntityTags(), origin, rotation, mode, layerY, excavateAir
+                );
+                serverPlayer.displayClientMessage(Component.literal(result.message()), true);
+            });
+
+            this.minecraft.setScreen(null);
+            return;
+        }
+
+        Connection connection = (this.minecraft.getConnection() != null)
+                ? this.minecraft.getConnection().getConnection()
+                : null;
+        if (!SchematonNetwork.isRemoteChannelPresent(connection)) {
             this.minecraft.player.displayClientMessage(
                     Component.literal("Paste on dedicated servers requires the server side mod to be present"),
                     true
@@ -251,29 +276,59 @@ public class GuiSchematicControl extends Screen {
             return;
         }
 
-        // Snapshot client state before hopping to the server thread
-        var data = active.getSchematic();
-        BlockPos origin = SchematicPlacement.getOrigin();
-        var rotation = SchematicPlacement.getRotation();
-        SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
-        int layerY = SchematicPlacement.getLayerY();
-        boolean excavateAir = SchematicPlacement.isExcavateAir();
-        var dim = this.minecraft.player.level().dimension();
-        var playerUuid = this.minecraft.player.getUUID();
-
-        server.execute(() -> {
-            ServerLevel serverLevel = server.getLevel(dim);
-            ServerPlayer serverPlayer = server.getPlayerList().getPlayer(playerUuid);
-            if (serverLevel == null || serverPlayer == null) return;
-
-            // TODO: Pass blockEntityTags map from SchematicData once exposed
-            SchematicPaster.PasteResult result = SchematicPaster.pasteVisibleLayers(
-                    serverLevel, serverPlayer, data, null, origin, rotation, mode, layerY, excavateAir
+        Map<BlockPos, PasteSchematicPacket.PlacedBlockEntry> entries = collectSchematicEntries(active);
+        PasteSchematicPacket packet = new PasteSchematicPacket(
+                data.getSize(),
+                origin,
+                rotation,
+                mode,
+                layerY,
+                excavateAir,
+                entries
+        );
+        if (!SchematonNetwork.sendToServer(packet)) {
+            this.minecraft.player.displayClientMessage(
+                    Component.literal("Failed sending schematic paste packet to server"),
+                    true
             );
-            serverPlayer.displayClientMessage(Component.literal(result.message()), true);
-        });
+            return;
+        }
 
         this.minecraft.setScreen(null);
+    }
+
+    private static Map<BlockPos, PasteSchematicPacket.PlacedBlockEntry> collectSchematicEntries(VirtualSchematicLevel active) {
+        Vec3i size = active.getSchematic().getSize();
+        Map<BlockPos, CompoundTag> beTags = active.getSchematic().getBlockEntityTags();
+        Map<BlockPos, PasteSchematicPacket.PlacedBlockEntry> result = new HashMap<>();
+
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int y = 0; y < size.getY(); y++) {
+            for (int z = 0; z < size.getZ(); z++) {
+                for (int x = 0; x < size.getX(); x++) {
+                    cursor.set(x, y, z);
+                    BlockState state = active.getBlockState(cursor);
+                    if (state.isAir()) continue;
+
+                    BlockPos immutablePos = cursor.immutable();
+                    CompoundTag beTag = null;
+                    if (beTags != null && beTags.containsKey(immutablePos)) {
+                        CompoundTag raw = beTags.get(immutablePos);
+                        if (raw != null) {
+                            beTag = raw.copy();
+                        }
+                    } else {
+                        BlockEntity virtualBe = active.getBlockEntity(cursor);
+                        if (virtualBe != null) {
+                            beTag = virtualBe.saveWithFullMetadata();
+                        }
+                    }
+
+                    result.put(immutablePos, new PasteSchematicPacket.PlacedBlockEntry(immutablePos, state, beTag));
+                }
+            }
+        }
+        return result;
     }
 
     private EditBox createAxisRow(String label, int x, int y, int axisIndex) {

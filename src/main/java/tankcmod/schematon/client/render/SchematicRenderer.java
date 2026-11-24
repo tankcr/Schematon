@@ -19,6 +19,10 @@ import org.joml.Matrix4f;
 import tankcmod.schematon.format.SchematicData;
 import tankcmod.schematon.world.SchematicPlacement;
 import tankcmod.schematon.world.VirtualSchematicLevel;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 public class SchematicRenderer {
     private static VertexBuffer cachedBuffer = null;
@@ -95,13 +99,62 @@ public class SchematicRenderer {
             translucent.clearRenderState();
         }
 
-        // 2. Render crisp cyan wireframe using ROTATED dimensions
+        // 2. Render BlockEntity renderers (e.g., chests, BER-backed blocks) inside the virtual schematic
+        renderBlockEntities(poseStack, virtualLevel);
+
+        // 3. Render crisp cyan wireframe using ROTATED dimensions
         renderBoundingBox(poseStack, virtualLevel.getRotatedSize());
 
-        // 3. Render Red/Green Placement Validation Highlights
+        // 4. Render Red/Green Placement Validation Highlights
         renderValidationOverlays(poseStack, virtualLevel, origin);
 
         poseStack.popPose();
+    }
+
+    private static void renderBlockEntities(PoseStack poseStack, VirtualSchematicLevel virtualLevel) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+
+        BlockEntityRenderDispatcher dispatcher = mc.getBlockEntityRenderDispatcher();
+        MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
+        Vec3i size = virtualLevel.getRotatedSize();
+
+        SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
+        int activeLayerY = SchematicPlacement.getLayerY();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        for (int y = 0; y < size.getY(); y++) {
+            if (mode == SchematicPlacement.LayerMode.SINGLE_LAYER && y != activeLayerY) continue;
+            if (mode == SchematicPlacement.LayerMode.ALL_BELOW && y > activeLayerY) continue;
+            if (mode == SchematicPlacement.LayerMode.ALL_ABOVE && y < activeLayerY) continue;
+
+            for (int z = 0; z < size.getZ(); z++) {
+                for (int x = 0; x < size.getX(); x++) {
+                    cursor.set(x, y, z);
+                    BlockEntity be = virtualLevel.getBlockEntity(cursor);
+                    if (be == null) continue;
+
+                    BlockEntityRenderer<BlockEntity> renderer = dispatcher.getRenderer(be);
+                    if (renderer == null) continue;
+
+                    if (be.getLevel() == null) {
+                        be.setLevel(mc.level);
+                    }
+
+                    poseStack.pushPose();
+                    poseStack.translate(x, y, z);
+                    try {
+                        // Full bright (0x00F000F0) and overlayNO_OVERLAY (655360) for clean hologram visibility
+                        renderer.render(be, mc.getFrameTime(), poseStack, bufferSource, 0x00F000F0, 655360);
+                    } catch (Exception ignored) {
+                        // Avoid crashing the hologram render pass on modded BERs that expect a real world/chunk
+                    }
+                    poseStack.popPose();
+                }
+            }
+        }
+
+        bufferSource.endBatch();
     }
 
     private static void rebuildBuffer(VirtualSchematicLevel virtualLevel) {

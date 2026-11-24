@@ -97,10 +97,10 @@ public class SchematicPlacement {
         int halfZ = rotatedSize.getZ() / 2;
 
         return switch (facing) {
-            case SOUTH -> new BlockPos(x - halfX, y, z + gapBlocks);
-            case NORTH -> new BlockPos(x - halfX, y, z - gapBlocks - rotatedSize.getZ() + 1);
-            case EAST  -> new BlockPos(x + gapBlocks, y, z - halfZ);
-            case WEST  -> new BlockPos(x - gapBlocks - rotatedSize.getX() + 1, y, z - halfZ);
+            case SOUTH -> new BlockPos(x - halfX, y, z + gapBlocks + 1);
+            case NORTH -> new BlockPos(x - halfX, y, z - gapBlocks - rotatedSize.getZ());
+            case EAST  -> new BlockPos(x + gapBlocks + 1, y, z - halfZ);
+            case WEST  -> new BlockPos(x - gapBlocks - rotatedSize.getX(), y, z - halfZ);
             default    -> playerPos;
         };
     }
@@ -120,6 +120,7 @@ public class SchematicPlacement {
     public static void setActiveSchematic(VirtualSchematicLevel level) {
         activeSchematic = level;
         rotation = Rotation.NONE;
+        tankcmod.schematon.client.create.SchematicSelection.clear();
         SchematicRenderer.markDirty();
     }
 

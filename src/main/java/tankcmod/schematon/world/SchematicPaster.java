@@ -12,12 +12,22 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import tankcmod.schematon.compat.CompatManager;
 import tankcmod.schematon.format.SchematicData;
+import tankcmod.schematon.config.SchematonConfig;
 
 import javax.annotation.Nullable;
 import java.util.Map;
 
 public class SchematicPaster {
-
+    private static SchematonConfig.PasteMode getEffectivePasteMode() {
+        try {
+            if (SchematonConfig.SPEC.isLoaded()) {
+                return SchematonConfig.ALLOW_PASTE.get();
+            }
+        } catch (Exception ignored) {
+            // Default to OpOnly if config isn't loaded
+        }
+        return SchematonConfig.PasteMode.OpOnly;
+    }
     public record PasteResult(boolean success, int blocksPlaced, int blocksExcavated, int blockEntitiesRestored, String message) {}
 
     public static PasteResult pasteVisibleLayers(
@@ -31,8 +41,19 @@ public class SchematicPaster {
             int activeLayerY,
             boolean excavateAir
     ) {
-        if (!player.isCreative()) {
-            return new PasteResult(false, 0, 0, 0, "Paste is only available in Creative mode.");
+        SchematonConfig.PasteMode pasteMode = getEffectivePasteMode();
+        if (pasteMode == SchematonConfig.PasteMode.Disabled) {
+            return new PasteResult(false, 0, 0, 0, "Paste Mode is disabled by server configuration.");
+        }
+
+        boolean allowedByMode = switch (pasteMode) {
+            case All -> true;
+            case OpOnly -> player.isCreative() || player.hasPermissions(2);
+            case Disabled -> false;
+        };
+
+        if (!allowedByMode) {
+            return new PasteResult(false, 0, 0, 0, "Paste requires operator permissions or Creative mode.");
         }
 
         if (data == null) {

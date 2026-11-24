@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.client.model.data.ModelData;
+import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 
@@ -41,6 +42,9 @@ public interface ISchematicCompat {
         copy.putInt("y", worldPos.getY());
         copy.putInt("z", worldPos.getZ());
         return copy;
+    }
+    default CompoundTag prepareSaveTag(BlockEntity be, CompoundTag rawTag, BlockPos worldPos, Level level) {
+        return rawTag;
     }
 
     /**

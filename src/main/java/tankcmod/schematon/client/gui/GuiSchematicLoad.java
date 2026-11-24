@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Locale;
 
 public class GuiSchematicLoad extends Screen {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -68,10 +69,13 @@ public class GuiSchematicLoad extends Screen {
 
     private void refreshFileList() {
         this.listWidget.clearEntries();
-        File[] files = this.schematicsDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".nbt"));
+        File[] files = this.schematicsDir.listFiles((dir, name) -> {
+            String lower = name.toLowerCase(Locale.ROOT);
+            return lower.endsWith(".nbt") || lower.endsWith(".schem") || lower.endsWith(".litematic");
+        });
 
         if (files == null || files.length == 0) {
-            this.statusMessage = Component.literal("No .nbt schematics found in /schematics");
+            this.statusMessage = Component.literal("No .nbt, .schem, or .litematic schematics found in /schematics");
             this.statusColor = 0xFFAA00;
             this.loadButton.active = false;
             return;
@@ -100,13 +104,15 @@ public class GuiSchematicLoad extends Screen {
 
         File file = selected.getFile();
         try {
-            SchematicData data = SchematicData.loadFromNbtFile(file, this.minecraft.level);
+            SchematicData data = SchematicData.loadFromFile(file, this.minecraft.level);
             VirtualSchematicLevel virtualLevel = new VirtualSchematicLevel(data, this.minecraft.level);
 
-            // Anchor at the player's current block position (classic Schematica behavior)
-            BlockPos playerPos = this.minecraft.player.blockPosition();
+            // Anchor in front of the player based on their facing direction
             SchematicPlacement.setActiveSchematic(virtualLevel);
-            SchematicPlacement.setOrigin(playerPos);
+            BlockPos frontOrigin = SchematicPlacement.calculateFrontOrigin(
+                    this.minecraft.player, virtualLevel.getRotatedSize(), 2
+            );
+            SchematicPlacement.setOrigin(frontOrigin);
 
             if (!data.getMissingModBlocks().isEmpty()) {
                 this.minecraft.player.displayClientMessage(

@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.client.model.data.ModelData;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -21,6 +22,8 @@ public class CompatManager {
 
     static {
         HANDLERS.add(new AE2Compat());
+        HANDLERS.add(new AgriCraftCompat());
+        HANDLERS.add(new MysticalAgriCompat());
     }
 
     public static CompoundTag prepareTag(BlockEntity be, CompoundTag tag, BlockPos localPos, BlockAndTintGetter schematicLevel) {
@@ -35,6 +38,12 @@ public class CompatManager {
         if (handler != null) {
             handler.onBlockEntityLoad(be, tag, localPos, schematicLevel);
         }
+    }
+
+    public static CompoundTag prepareSaveTag(BlockEntity be, CompoundTag rawTag, BlockPos worldPos, Level level) {
+        if (be == null) return rawTag;
+        ISchematicCompat handler = findHandler(be);
+        return handler != null ? handler.prepareSaveTag(be, rawTag, worldPos, level) : rawTag;
     }
 
     public static ModelData getModelData(BlockEntity be) {

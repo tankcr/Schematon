@@ -18,6 +18,7 @@ import tankcmod.schematon.format.SchematicData;
 import tankcmod.schematon.world.SchematicPlacement;
 import tankcmod.schematon.world.VirtualSchematicLevel;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import tankcmod.schematon.config.SchematonConfig;
 
 public class SchematicPrinter {
     private static final int TICKS_PER_PLACEMENT = 2; // 10 blocks/sec max to avoid packet spam
@@ -59,15 +60,34 @@ public class SchematicPrinter {
     /**
      * Future hook for the Printer Machine + Config requirement.
      */
+    /**
+     * Enforces AllowPrint config (GameType vs Survival) and future Printer Machine checks safely.
+     */
     private static boolean canUsePrinter(LocalPlayer player) {
-        if (player.isCreative()) {
-            return true;
+        SchematonConfig.PrintMode mode = getEffectivePrintMode();
+        if (mode == SchematonConfig.PrintMode.Survival) {
+            // Survival mode allows printing from player inventory regardless of gamemode
+        } else if (!player.isCreative()) {
+            // GameType mode: non-creative players are limited to inventory items;
+            // creative players can also pull/spawn required items.
         }
+
         if (!requirePrinterMachine) {
             return true;
         }
         // TODO: Check for nearby active Printer Machine BlockEntity or handheld Printer item
         return false;
+    }
+
+    private static SchematonConfig.PrintMode getEffectivePrintMode() {
+        try {
+            if (SchematonConfig.SPEC.isLoaded()) {
+                return SchematonConfig.ALLOW_PRINT.get();
+            }
+        } catch (Exception ignored) {
+            // Fall back safely if config is not yet loaded or absent on remote server
+        }
+        return SchematonConfig.PrintMode.GameType;
     }
 
     private static boolean tryPlaceNextBlock(Minecraft mc, LocalPlayer player, VirtualSchematicLevel virtualLevel) {
@@ -194,6 +214,15 @@ public class SchematicPrinter {
     }
 
     private static boolean prepareItemInMainHand(Minecraft mc, LocalPlayer player, ItemStack requiredStack) {
+        if (player.isCreative()) {
+            Inventory inv = player.getInventory();
+            ItemStack creativeStack = requiredStack.copy();
+            creativeStack.setCount(1);
+            inv.setItem(inv.selected, creativeStack);
+            mc.gameMode.handleCreativeModeItemAdd(creativeStack, 36 + inv.selected);
+            return true;
+        }
+
         if (ItemStack.isSameItemSameTags(player.getMainHandItem(), requiredStack)) {
             return true;
         }
