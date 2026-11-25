@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
+import tankcmod.schematon.client.gui.ExportProgressOverlay;
 
 import java.util.function.Supplier;
 
@@ -36,6 +37,7 @@ public class PasteSchematicResponsePacket {
     private static final class ClientHandler {
         private static void apply(PasteSchematicResponsePacket msg) {
             Minecraft mc = Minecraft.getInstance();
+            ExportProgressOverlay.complete(msg.success, msg.message);
             if (mc.player != null) {
                 mc.player.displayClientMessage(
                         Component.literal((msg.success ? "§a[Schematon] " : "§c[Schematon] ") + msg.message),

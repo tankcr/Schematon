@@ -8,6 +8,10 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtIo;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -17,6 +21,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import tankcmod.schematon.network.PasteSchematicPacket;
 import tankcmod.schematon.network.SchematonNetwork;
+import tankcmod.schematon.network.PasteSchematicChunkPacket;
+import java.util.UUID;
 import tankcmod.schematon.world.SchematicPaster;
 import tankcmod.schematon.world.SchematicPlacement;
 import tankcmod.schematon.world.VirtualSchematicLevel;
@@ -118,7 +124,7 @@ public class GuiSchematicControl extends Screen {
         // --- RIGHT EDGE: Utilities & Slicing (Hidden in Compact Mode) ---
         int utilW = 85;
         int utilX = this.width - utilW - margin;
-        int utilStartY = (this.height - (rowSpacing * 7)) / 2;
+        int utilStartY = Math.max(36, (this.height - (rowSpacing * 8)) / 2);
 
         // Row 1: Unload (Half Width) & Hide/Show (Half Width)
         addFullModeWidget(Button.builder(Component.literal("Unload"), b -> {
@@ -194,6 +200,15 @@ public class GuiSchematicControl extends Screen {
         pasteBtn.active = canPaste;
         addFullModeWidget(pasteBtn);
 
+        // Row 8: Hide/Show Validation Glow Highlights
+        addFullModeWidget(Button.builder(
+                Component.literal(getValidationHighlightsButtonText()),
+                b -> {
+                    SchematicPlacement.toggleValidationHighlightsHidden();
+                    b.setMessage(Component.literal(getValidationHighlightsButtonText()));
+                }
+        ).bounds(utilX, utilStartY + (rowSpacing * 7), utilW, 20).build());
+
         // --- BOTTOM CENTER: Done (Hidden in Compact Mode; Esc still closes) ---
         addFullModeWidget(Button.builder(Component.literal("Done"), b -> {
             if (this.minecraft != null) {
@@ -231,6 +246,10 @@ public class GuiSchematicControl extends Screen {
 
     private String getPrinterButtonText() {
         return SchematicPlacement.isPrinterEnabled() ? "Printer: ON" : "Printer: OFF";
+    }
+
+    private String getValidationHighlightsButtonText() {
+        return SchematicPlacement.isValidationHighlightsHidden() ? "Glow: OFF" : "Glow: ON";
     }
 
     private void executeCreativePaste() {
@@ -277,23 +296,61 @@ public class GuiSchematicControl extends Screen {
         }
 
         Map<BlockPos, PasteSchematicPacket.PlacedBlockEntry> entries = collectSchematicEntries(active);
-        PasteSchematicPacket packet = new PasteSchematicPacket(
-                data.getSize(),
-                origin,
-                rotation,
-                mode,
-                layerY,
-                excavateAir,
-                entries
-        );
-        if (!SchematonNetwork.sendToServer(packet)) {
-            this.minecraft.player.displayClientMessage(
-                    Component.literal("Failed sending schematic paste packet to server"),
-                    true
-            );
-            return;
-        }
+        String schName = data.getName();
+        ExportProgressOverlay.start(schName, "Uploading schematic to server...");
 
+        if (entries.size() <= PasteSchematicChunkPacket.ENTRIES_PER_CHUNK) {
+            PasteSchematicPacket packet = new PasteSchematicPacket(
+                    data.getSize(),
+                    origin,
+                    rotation,
+                    mode,
+                    layerY,
+                    excavateAir,
+                    entries
+            );
+            if (!SchematonNetwork.sendToServer(packet)) {
+                ExportProgressOverlay.complete(false, "Failed sending paste packet.");
+                this.minecraft.player.displayClientMessage(
+                        Component.literal("Failed sending schematic paste packet to server"),
+                        true
+                );
+                return;
+            }
+            ExportProgressOverlay.updateProgress(0.65f, "Server pasting schematic...");
+        } else {
+            List<List<PasteSchematicPacket.PlacedBlockEntry>> batches = partitionEntriesBySize(new ArrayList<>(entries.values()));
+            int totalChunks = batches.size();
+            UUID transferId = UUID.randomUUID();
+
+            for (int i = 0; i < totalChunks; i++) {
+                List<PasteSchematicPacket.PlacedBlockEntry> slice = batches.get(i);
+
+                PasteSchematicChunkPacket chunkPacket = new PasteSchematicChunkPacket(
+                        transferId,
+                        i,
+                        totalChunks,
+                        data.getSize(),
+                        origin,
+                        rotation,
+                        mode,
+                        layerY,
+                        excavateAir,
+                        slice
+                );
+                if (!SchematonNetwork.sendToServer(chunkPacket)) {
+                    ExportProgressOverlay.complete(false, "Failed uploading chunk " + (i + 1) + "/" + totalChunks);
+                    this.minecraft.player.displayClientMessage(
+                            Component.literal("Failed uploading schematic paste chunk to server"),
+                            true
+                    );
+                    return;
+                }
+                float frac = (float) (i + 1) / (float) totalChunks;
+                ExportProgressOverlay.updateProgress(frac * 0.65f, "Uploaded chunk " + (i + 1) + "/" + totalChunks + "...");
+            }
+            ExportProgressOverlay.updateProgress(0.70f, "Server pasting in layers...");
+        }
         this.minecraft.setScreen(null);
     }
 
@@ -329,6 +386,47 @@ public class GuiSchematicControl extends Screen {
             }
         }
         return result;
+    }
+
+    private static List<List<PasteSchematicPacket.PlacedBlockEntry>> partitionEntriesBySize(
+            List<PasteSchematicPacket.PlacedBlockEntry> allEntries
+    ) {
+        List<List<PasteSchematicPacket.PlacedBlockEntry>> batches = new ArrayList<>();
+        List<PasteSchematicPacket.PlacedBlockEntry> current = new ArrayList<>();
+        int currentBytes = 0;
+
+        for (PasteSchematicPacket.PlacedBlockEntry entry : allEntries) {
+            int entryBytes = estimateEntryBytes(entry);
+            if (!current.isEmpty() && (current.size() >= PasteSchematicChunkPacket.ENTRIES_PER_CHUNK
+                    || currentBytes + entryBytes > PasteSchematicChunkPacket.MAX_CHUNK_BYTES)) {
+                batches.add(current);
+                current = new ArrayList<>();
+                currentBytes = 0;
+            }
+            current.add(entry);
+            currentBytes += entryBytes;
+        }
+
+        if (!current.isEmpty()) {
+            batches.add(current);
+        }
+        return batches;
+    }
+
+    private static int estimateEntryBytes(PasteSchematicPacket.PlacedBlockEntry entry) {
+        int bytes = 12; // BlockPos + VarInt block state ID + boolean flag
+        CompoundTag tag = entry.blockEntityTag();
+        if (tag != null && !tag.isEmpty()) {
+            try {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream dos = new DataOutputStream(baos);
+                NbtIo.write(tag, dos);
+                bytes += baos.size();
+            } catch (IOException ignored) {
+                bytes += 512;
+            }
+        }
+        return bytes;
     }
 
     private EditBox createAxisRow(String label, int x, int y, int axisIndex) {

@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import tankcmod.schematon.client.create.SchematicSelection;
 import tankcmod.schematon.format.SchematicExporter;
+import tankcmod.schematon.client.gui.ExportProgressOverlay;
 import tankcmod.schematon.network.ExportSchematicRequestPacket;
 import tankcmod.schematon.network.SchematonNetwork;
 
@@ -322,14 +323,16 @@ public class GuiSchematicCreate extends Screen {
         var dimKey = this.minecraft.player.level().dimension();
         var clientLevel = this.minecraft.level;
         var player = this.minecraft.player;
+        ExportProgressOverlay.start(fileName, singleplayerServer != null ? "Scanning world..." : "Requesting server export...");
 
         if (singleplayerServer != null) {
             singleplayerServer.execute(() -> {
                 ServerLevel serverLevel = singleplayerServer.getLevel(dimKey);
                 Level targetLevel = (serverLevel != null) ? serverLevel : clientLevel;
                 SchematicExporter.ExportResult result = SchematicExporter.exportToNbtFile(
-                        targetLevel, min, max, schematicsDir, fileName, captureEntities, skipAir, skipContents
+                        targetLevel, min, max, schematicsDir, fileName, captureEntities, skipAir, skipContents, ExportProgressOverlay::updateProgress
                 );
+                ExportProgressOverlay.complete(result.success(), result.message());
                 this.minecraft.execute(() -> player.displayClientMessage(
                         Component.literal((result.success() ? "§a[Schematon] " : "§c[Schematon] ") + result.message()),
                         false
@@ -353,13 +356,15 @@ public class GuiSchematicCreate extends Screen {
                 );
                 return;
             }
+            ExportProgressOverlay.updateProgress(0.35f, "Server building schematic...");
             this.minecraft.setScreen(null);
             return;
         }
 
         SchematicExporter.ExportResult result = SchematicExporter.exportToNbtFile(
-                clientLevel, min, max, schematicsDir, fileName, captureEntities, skipAir, skipContents
+                clientLevel, min, max, schematicsDir, fileName, captureEntities, skipAir, skipContents, ExportProgressOverlay::updateProgress
         );
+        ExportProgressOverlay.complete(result.success(), result.message());
         player.displayClientMessage(
                 Component.literal((result.success() ? "§a[Schematon] " : "§c[Schematon] ") + result.message()),
                 false

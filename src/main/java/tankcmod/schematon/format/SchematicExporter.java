@@ -35,6 +35,11 @@ import java.util.Map;
 public class SchematicExporter {
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    @FunctionalInterface
+    public interface ExportProgressCallback {
+        void onProgress(float progress, String status);
+    }
+
     public record ExportResult(
             boolean success,
             @Nullable File outputFile,
@@ -66,6 +71,22 @@ public class SchematicExporter {
     }
 
     /**
+     * Backwards-compatible overload without progress callback.
+     */
+    public static ExportResult exportToNbtFile(
+            Level level,
+            BlockPos pos1,
+            BlockPos pos2,
+            File outputDir,
+            String fileName,
+            boolean includeEntities,
+            boolean ignoreAir,
+            boolean ignoreContents
+    ) {
+        return exportToNbtFile(level, pos1, pos2, outputDir, fileName, includeEntities, ignoreAir, ignoreContents, null);
+    }
+
+    /**
      * Exports a region [pos1..pos2] from the given Level (ServerLevel or client Level)
      * into a compressed Structure .nbt file inside outputDir.
      */
@@ -77,7 +98,7 @@ public class SchematicExporter {
             String fileName,
             boolean includeEntities,
             boolean ignoreAir,
-            boolean ignoreContents
+            boolean ignoreContents, @Nullable ExportProgressCallback progressCallback
     ) {
         if (level == null) {
             return fail(fileName, "World level is null.");
@@ -124,6 +145,10 @@ public class SchematicExporter {
         int unloadedSkipped = 0;
 
         BlockPos.MutableBlockPos worldCursor = new BlockPos.MutableBlockPos();
+
+        if (progressCallback != null) {
+            progressCallback.onProgress(0.02f, "Scanning layer 0 / " + height + "...");
+        }
 
         for (int y = 0; y < height; y++) {
             int wy = minPos.getY() + y;
@@ -189,6 +214,15 @@ public class SchematicExporter {
                     }
                 }
             }
+
+            if (progressCallback != null) {
+                float scanFrac = (float) (y + 1) / (float) height;
+                progressCallback.onProgress(0.05f + (scanFrac * 0.80f), "Scanning layer " + (y + 1) + " / " + height + "...");
+            }
+        }
+
+        if (progressCallback != null) {
+            progressCallback.onProgress(0.88f, "Building palette & NBT...");
         }
 
         ListTag paletteTag = new ListTag();
@@ -209,11 +243,16 @@ public class SchematicExporter {
 
         int entitiesSaved = 0;
         if (includeEntities) {
+            if (progressCallback != null) {
+                progressCallback.onProgress(0.92f, "Capturing entities...");
+            }
             ListTag entitiesTag = captureEntities(level, minPos, maxPos);
             entitiesSaved = entitiesTag.size();
             root.put("entities", entitiesTag);
         }
-
+        if (progressCallback != null) {
+        progressCallback.onProgress(0.96f, "Writing compressed .nbt...");
+        }
         try {
             NbtIo.writeCompressed(root, outFile);
         } catch (IOException e) {

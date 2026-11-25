@@ -13,6 +13,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import tankcmod.schematon.compat.CompatManager;
 import tankcmod.schematon.format.SchematicData;
 import tankcmod.schematon.config.SchematonConfig;
+import tankcmod.schematon.world.SchematicChunkLoader;
+import java.util.ArrayList;
 
 import javax.annotation.Nullable;
 import java.util.Map;

@@ -270,6 +270,10 @@ public class SchematicRenderer {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return;
 
+        if (SchematicPlacement.isValidationHighlightsHidden()) {
+            return;
+        }
+
         Vec3i size = virtualLevel.getRotatedSize();
         SchematicPlacement.LayerMode mode = SchematicPlacement.getLayerMode();
         int activeLayerY = SchematicPlacement.getLayerY();

@@ -39,6 +39,12 @@ public final class SchematonNetwork {
                 .consumerMainThread(ExportSchematicRequestPacket::handle)
                 .add();
 
+        CHANNEL.messageBuilder(ExportSchematicChunkPacket.class, nextId(), NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(ExportSchematicChunkPacket::encode)
+                .decoder(ExportSchematicChunkPacket::decode)
+                .consumerMainThread(ExportSchematicChunkPacket::handle)
+                .add();
+
         CHANNEL.messageBuilder(ExportSchematicResponsePacket.class, nextId(), NetworkDirection.PLAY_TO_CLIENT)
                 .encoder(ExportSchematicResponsePacket::encode)
                 .decoder(ExportSchematicResponsePacket::decode)
@@ -49,6 +55,12 @@ public final class SchematonNetwork {
                 .encoder(PasteSchematicPacket::encode)
                 .decoder(PasteSchematicPacket::decode)
                 .consumerMainThread(PasteSchematicPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(PasteSchematicChunkPacket.class, nextId(), NetworkDirection.PLAY_TO_SERVER)
+                .encoder(PasteSchematicChunkPacket::encode)
+                .decoder(PasteSchematicChunkPacket::decode)
+                .consumerMainThread(PasteSchematicChunkPacket::handle)
                 .add();
 
         CHANNEL.messageBuilder(PasteSchematicResponsePacket.class, nextId(), NetworkDirection.PLAY_TO_CLIENT)

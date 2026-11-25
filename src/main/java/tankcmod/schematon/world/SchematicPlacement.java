@@ -19,6 +19,7 @@ public class SchematicPlacement {
     private static LayerMode layerMode = LayerMode.ALL;
     private static int layerY = 0;
     private static boolean hidden = false;
+    private static boolean hideValidationHighlights = false;
     private static boolean excavateAir = true;
     private static boolean showMaterialsHud = false;
     private static boolean printerEnabled = false;
@@ -168,6 +169,21 @@ public class SchematicPlacement {
 
     public static void setHidden(boolean state) {
         hidden = state;
+    }
+
+    public static boolean isValidationHighlightsHidden() {
+        return hideValidationHighlights;
+    }
+
+    public static void setValidationHighlightsHidden(boolean hiddenHighlights) {
+        if (hideValidationHighlights != hiddenHighlights) {
+            hideValidationHighlights = hiddenHighlights;
+            SchematicRenderer.markDirty();
+        }
+    }
+
+    public static void toggleValidationHighlightsHidden() {
+        setValidationHighlightsHidden(!hideValidationHighlights);
     }
 
     public static boolean isExcavateAir() {

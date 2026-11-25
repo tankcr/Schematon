@@ -9,6 +9,7 @@ import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import org.slf4j.Logger;
 import tankcmod.schematon.format.SchematicExporter;
+import tankcmod.schematon.client.gui.ExportProgressOverlay;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -60,14 +61,19 @@ public class ExportSchematicResponsePacket {
             }
 
             if (!msg.success || msg.nbtBytes.length == 0) {
+                ExportProgressOverlay.complete(false, msg.message);
                 mc.player.displayClientMessage(Component.literal("§c[Schematon] " + msg.message), false);
                 return;
             }
 
+            ExportProgressOverlay.updateProgress(0.85f, "Saving received .nbt...");
+
             File schematicsDir = new File(mc.gameDirectory, "schematics");
             if (!schematicsDir.exists() && !schematicsDir.mkdirs()) {
+                String err = "Failed creating schematics folder: " + schematicsDir.getAbsolutePath();
+                ExportProgressOverlay.complete(false, err);
                 mc.player.displayClientMessage(
-                        Component.literal("§c[Schematon] Failed creating schematics folder: " + schematicsDir.getAbsolutePath()),
+                        Component.literal("§c[Schematon] " + err),
                         false
                 );
                 return;
@@ -78,11 +84,14 @@ public class ExportSchematicResponsePacket {
 
             try (FileOutputStream fos = new FileOutputStream(outFile)) {
                 fos.write(msg.nbtBytes);
+                ExportProgressOverlay.complete(true, msg.message);
                 mc.player.displayClientMessage(Component.literal("§a[Schematon] " + msg.message), false);
             } catch (IOException e) {
                 LOGGER.error("Failed saving received schematic '{}' to {}", safeName, outFile.getAbsolutePath(), e);
+                String err = "Failed saving .nbt locally: " + e.getMessage();
+                ExportProgressOverlay.complete(false, err);
                 mc.player.displayClientMessage(
-                        Component.literal("§c[Schematon] Failed saving .nbt locally: " + e.getMessage()),
+                        Component.literal("§c[Schematon] " + err),
                         false
                 );
             }
